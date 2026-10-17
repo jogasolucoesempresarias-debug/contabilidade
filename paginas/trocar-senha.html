@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trocar senha</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/marca.css">
+<style>
+  .login { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+  .login form { width: min(400px, 100%); display: grid; gap: 16px; padding: 28px; }
+  .login h1 { font-size: 20px; }
+</style>
+</head>
+<body>
+<main class="login">
+  <form class="painel" id="form" novalidate>
+    <h1>Crie a sua senha</h1>
+    <p class="dim" style="margin:0">A senha que você recebeu é provisória. Escolha uma nova, com pelo menos 8 caracteres.</p>
+    <div class="campo" id="campo-atual" hidden><label for="atual">Senha atual</label><input id="atual" type="password" autocomplete="current-password"></div>
+    <div class="campo"><label for="nova">Nova senha</label><input id="nova" type="password" autocomplete="new-password" minlength="8" required></div>
+    <div class="campo"><label for="confirma">Repita a nova senha</label><input id="confirma" type="password" autocomplete="new-password" required></div>
+    <div class="msg-erro" id="erro" role="alert"></div>
+    <button class="btn btn-primario" type="submit">Salvar senha</button>
+  </form>
+</main>
+<script src="/static/app.js"></script>
+<script>
+  api('/api/me').then(me => { if (!me.trocar_senha) document.getElementById('campo-atual').hidden = false; });
+  document.getElementById('form').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const erro = document.getElementById('erro'); erro.textContent = '';
+    if (nova.value !== confirma.value) { erro.textContent = 'As duas senhas não são iguais.'; return; }
+    try {
+      const r = await api('/api/trocar-senha', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ atual: atual.value, nova: nova.value }) });
+      location.href = r.redirect || '/';
+    } catch (e) { erro.textContent = e.message; }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+_srv*.out
+_srv*.err
+
+# Documentos de cliente NUNCA entram no git (já houve vazamento por repo público em outros
+# projetos). As amostras ficam numa pasta fora do repositório (AMOSTRAS_DIR); os enviados, em _dados/.
+_dados/
+*.pdf
+*.ofx
+*.xml
+*.xls
+*.xlsx

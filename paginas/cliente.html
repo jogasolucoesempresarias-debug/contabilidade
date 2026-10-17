@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cliente</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/marca.css">
+<style>
+  .cab-cliente { display: grid; gap: 4px; }
+  .cab-cliente .sub { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; color: var(--text-dim); }
+  .acoes { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  .desc-sub { display: block; font-size: 12.5px; color: var(--text-mute); margin-top: 2px; }
+  .pend-lista { display: grid; gap: 8px; }
+  .pend { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; padding: 12px 14px; }
+  .pend .cod { font-family: var(--mono); font-size: 12px; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: var(--warn-bg); color: var(--warn); align-self: start; }
+  .pend.info .cod { background: var(--info-bg); color: var(--info); }
+  .pend .det { color: var(--text-dim); font-size: 13px; grid-column: 2; }
+  .planilha th { text-transform: none; letter-spacing: 0; font-family: var(--mono); font-size: 12px; }
+  .planilha td { font-size: 13px; white-space: nowrap; }
+  .em-branco { color: var(--warn); font-style: italic; }
+  .confirmar { color: var(--erro); }
+</style>
+</head>
+<body>
+<main class="pagina">
+  <div class="titulo-linha">
+    <a class="voltar" id="voltar" href="/clientes">← Clientes</a>
+  </div>
+  <div class="titulo-linha">
+    <div class="cab-cliente">
+      <h1 id="razao">—</h1>
+      <div class="sub"><span class="mono" id="cnpj"></span><span id="situacao"></span></div>
+    </div>
+    <div class="seletor-mes" aria-label="Mês">
+      <button type="button" id="mes-ant" aria-label="Mês anterior">‹</button>
+      <span id="mes-rotulo">—</span>
+      <button type="button" id="mes-prox" aria-label="Próximo mês">›</button>
+    </div>
+    <div class="acoes">
+      <a class="btn" id="btn-cliente" target="_blank" rel="noopener">Ver como o cliente</a>
+      <a class="btn btn-primario" id="btn-planilha">Baixar planilha (.xls)</a>
+    </div>
+  </div>
+
+  <div class="envio" id="envio">
+    <div class="envio-texto">
+      <strong>Arraste os documentos do mês para cá</strong>
+      <span class="dim">PDF, OFX ou XML. Vários de uma vez. Foto não é aceita: envie o PDF original do banco ou do emissor.</span>
+    </div>
+    <label class="btn" for="arquivos">Escolher arquivos</label>
+    <input id="arquivos" type="file" accept=".pdf,.ofx,.xml,application/pdf" multiple hidden>
+  </div>
+  <div class="resultados-envio" id="resultados" aria-live="polite"></div>
+
+  <div class="abas" role="tablist">
+    <button class="aba ativo" data-aba="pagamentos" role="tab">Pagamentos<span class="qtd" id="q-pagamentos">0</span></button>
+    <button class="aba" data-aba="documentos" role="tab">Documentos<span class="qtd" id="q-documentos">0</span></button>
+    <button class="aba" data-aba="planilha" role="tab">Planilha<span class="qtd" id="q-planilha">0</span></button>
+    <button class="aba" data-aba="pendencias" role="tab">Pendências<span class="qtd" id="q-pendencias">0</span></button>
+  </div>
+  <div class="conteudo-aba" id="conteudo"></div>
+</main>
+
+<div class="lateral-fundo" id="lateral-fundo" hidden></div>
+<aside class="lateral" id="lateral" hidden aria-label="Detalhe do pagamento">
+  <div class="lateral-cab">
+    <h2 id="lat-titulo">Pagamento</h2>
+    <span id="lat-situacao"></span>
+    <button class="btn-texto" id="lat-fechar" type="button" style="margin-left:auto" aria-label="Fechar">✕ Fechar</button>
+  </div>
+  <div class="lateral-corpo">
+    <div class="previa"><div class="previa-abas" id="lat-docs"></div><iframe id="lat-iframe" title="Prévia do documento"></iframe></div>
+    <div class="detalhes" id="lat-detalhes"></div>
+  </div>
+</aside>
+
+<script src="/static/app.js"></script>
+<script>
+  const [, , empresaId, mesUrl] = location.pathname.split('/');
+  let mes = mesUrl, visao = null, abaAtual = 'pagamentos';
+  const PAPEL = { extrato_linha: 'Extrato', comprovante: 'Comprovante', guia: 'Guia', boleto: 'Boleto' };
+  const ORIGEM = { texto: 'Texto do PDF', ocr: 'OCR', ofx: 'OFX', xml: 'XML' };
+
+  function docPorId(id) { return visao.documentos.find(d => d.id === id); }
+  function fatoPorRef(ref) {
+    const [id, i] = String(ref).split(':').map(Number);
+    const d = docPorId(id);
+    return d && d.fatos ? d.fatos[i] : null;
+  }
+
+  // Na linha, o motivo da pendência sem repetir a descrição do pagamento ("DAS 09/2026: …").
+  function motivo(pe, p) {
+    const prefixo = `${p.descricao}`;
+    let t = pe.detalhe.startsWith(prefixo) ? pe.detalhe.slice(prefixo.length).replace(/^\s*(\([^)]*\))?\s*:\s*/, '') : pe.detalhe;
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+
+  // ── Abas ──
+  function desenharPagamentos() {
+    const ps = visao.pagamentos;
+    if (!ps.length) return `<div class="painel"><div class="vazio"><strong>Nenhum pagamento ainda</strong>Envie os documentos do mês: extrato, comprovantes e guias.</div></div>`;
+    return `<div class="painel tabela-wrap"><table>
+      <thead><tr><th></th><th>Data</th><th>Descrição</th><th class="num">Valor</th><th>Veio com</th><th>Lançamento</th></tr></thead>
+      <tbody>${ps.map((p, i) => {
+        const ok = p.situacao === 'ok';
+        const pend = visao.pendencias.filter(x => x.pagamento_id === p.id && !x.informativa);
+        const cl = p.classificacao;
+        const lanc = !cl ? '<span class="em-branco">sem regra</span>'
+          : (cl.lancto_auto ? `<span class="mono">${esc(cl.lancto_auto)}</span>` : '<span class="em-branco">falta o código</span>');
+        return `<tr class="clicavel" data-i="${i}" tabindex="0">
+          <td>${ok && !pend.length ? '<span class="icone-ok" title="Pronto">✓</span>' : '<span class="icone-warn" title="Precisa de atenção">⚠</span>'}</td>
+          <td class="num">${p.data ? dataBR(p.data) : '<span class="em-branco">sem data</span>'}${p.fonte_data === 'vencimento' ? '<span class="desc-sub">vencimento</span>' : ''}</td>
+          <td><strong>${esc(p.descricao)}</strong>${pend.length ? `<span class="desc-sub" style="color:var(--warn)">${esc(motivo(pend[0], p))}</span>`
+            : p.fonte_data === 'vencimento' ? `<span class="desc-sub" style="color:var(--info)">Data pelo vencimento da guia: o comprovante não traz a data do pagamento</span>`
+            : `<span class="desc-sub">Juntou por: ${esc(p.chave)}</span>`}</td>
+          <td class="num">${p.sentido === 'entrada' ? '+' : ''}${brl(p.valor)}</td>
+          <td>${p.documentos.map(d => `<span class="chip">${esc(PAPEL[d.papel] || d.papel)}</span>`).join('')}</td>
+          <td>${lanc}</td></tr>`;
+      }).join('')}</tbody></table></div>`;
+  }
+
+  function situacaoDoc(d) {
+    if (!d.reconhecido) return pill('pendencia', 'Não reconhecido nesta versão');
+    if (d.pendencias.includes('P6')) return pill('erro', 'De outra empresa');
+    if (d.pendencias.includes('P7')) return pill('sem_envio', 'Repetido');
+    if (d.pagamentos.length) return pill('ok', d.pagamentos.length === 1 ? 'Usado em 1 pagamento' : `Usado em ${d.pagamentos.length} pagamentos`);
+    return pill('recebendo', 'Lido');
+  }
+
+  function desenharDocumentos() {
+    const ds = visao.documentos;
+    if (!ds.length) return `<div class="painel"><div class="vazio"><strong>Nenhum documento neste mês</strong>Arraste os arquivos para a área acima.</div></div>`;
+    return `<div class="painel tabela-wrap"><table>
+      <thead><tr><th>Arquivo</th><th>Tipo</th><th>Lido por</th><th>Situação</th><th>Enviado</th><th></th></tr></thead>
+      <tbody>${ds.map(d => `<tr>
+        <td><strong>${esc(d.nome)}</strong>${d.avisos && d.avisos.length ? `<span class="desc-sub">${esc(d.avisos[0])}</span>` : ''}</td>
+        <td>${esc(d.tipo || '—')}</td>
+        <td>${esc(ORIGEM[d.origem] || '—')}${d.origem === 'ocr' && d.confianca != null ? ` <span class="dim">(${Math.round(d.confianca * 100)}%)</span>` : ''}</td>
+        <td>${situacaoDoc(d)}</td>
+        <td class="dim">${dataHoraBR(d.enviado_em)}<span class="desc-sub">${d.enviado_via === 'cliente' ? 'pelo cliente' : esc(d.enviado_por || 'escritório')}</span></td>
+        <td style="white-space:nowrap"><a class="btn-texto" href="/api/documento/${d.id}/arquivo" target="_blank" rel="noopener">Abrir</a>
+            <button class="btn-texto" data-remover="${d.id}" type="button">Remover</button></td></tr>`).join('')}</tbody></table></div>`;
+  }
+
+  function desenharPlanilha() {
+    const ls = visao.linhas;
+    if (!ls.length) return `<div class="painel"><div class="vazio"><strong>A planilha ainda está vazia</strong>Só entram pagamentos com data confirmada. Veja a aba Pendências.</div></div>`;
+    const semCodigo = ls.some(l => !l.lancto_auto);
+    const cab = ['lancto auto', 'debito', 'credito', 'data', 'valor', 'cód histórico', 'complemento historico', 'Ccusto debito', 'Ccusto credito', 'NrDocumento'];
+    return `${semCodigo ? `<div class="alerta-caixa" style="margin-bottom:10px">A coluna “lancto auto” está em branco: falta o código do lançamento automático na tabela do escritório. Assim que a tabela chegar, as regras são preenchidas e a coluna sai completa.</div>` : ''}
+      <div class="painel tabela-wrap planilha"><table>
+      <thead><tr>${cab.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+      <tbody>${ls.map(l => `<tr>
+        <td class="mono">${l.lancto_auto ? esc(l.lancto_auto) : '<span class="em-branco">—</span>'}</td>
+        <td class="num">${l.debito ?? ''}</td><td class="num">${l.credito ?? ''}</td>
+        <td class="num">${dataBR(l.data)}</td><td class="num">${brl(l.valor)}</td>
+        <td class="num">${l.cod_historico ?? ''}</td><td>${esc(l.complemento)}</td>
+        <td></td><td></td><td class="mono">${esc(l.nr_documento)}</td></tr>`).join('')}</tbody></table></div>
+      <p class="mute" style="margin-top:8px">Prévia exata do arquivo que será baixado (aba Planilha1, mesmas colunas do modelo).</p>`;
+  }
+
+  function desenharPendencias() {
+    const reais = visao.pendencias.filter(p => !p.informativa);
+    const info = visao.pendencias.filter(p => p.informativa);
+    if (!visao.pendencias.length) return `<div class="painel"><div class="vazio"><strong>Nenhuma pendência</strong>Tudo o que foi enviado virou lançamento.</div></div>`;
+    const item = (p, cls) => `<div class="painel pend ${cls}"><span class="cod">${esc(p.codigo)}</span><strong>${esc(p.titulo)}</strong><span class="det">${esc(p.detalhe)}</span></div>`;
+    return `<div class="pend-lista">${reais.map(p => item(p, '')).join('')}</div>
+      ${info.length ? `<h2 style="margin-top:22px">Informações</h2><div class="pend-lista">${info.map(p => item(p, 'info')).join('')}</div>` : ''}`;
+  }
+
+  function desenharAba() {
+    document.querySelectorAll('.aba').forEach(a => a.classList.toggle('ativo', a.dataset.aba === abaAtual));
+    const el = document.getElementById('conteudo');
+    el.innerHTML = { pagamentos: desenharPagamentos, documentos: desenharDocumentos, planilha: desenharPlanilha, pendencias: desenharPendencias }[abaAtual]();
+    el.querySelectorAll('tr.clicavel[data-i]').forEach(tr => {
+      const abrir = () => abrirLateral(visao.pagamentos[Number(tr.dataset.i)]);
+      tr.onclick = abrir; tr.onkeydown = e => { if (e.key === 'Enter') abrir(); };
+    });
+    el.querySelectorAll('[data-remover]').forEach(b => b.onclick = () => remover(b));
+  }
+
+  async function remover(botao) {
+    if (botao.dataset.confirmar !== '1') {
+      botao.dataset.confirmar = '1'; botao.textContent = 'Confirmar remoção'; botao.classList.add('confirmar');
+      setTimeout(() => { if (botao.isConnected) { botao.dataset.confirmar = ''; botao.textContent = 'Remover'; botao.classList.remove('confirmar'); } }, 4000);
+      return;
+    }
+    try { await api(`/api/documento/${botao.dataset.remover}`, { method: 'DELETE' }); toast('Documento removido'); carregar(); }
+    catch (e) { toast(e.message); }
+  }
+
+  // ── Painel lateral (só consulta) ──
+  function camposDoFato(f) {
+    if (!f) return [];
+    const c = [];
+    const add = (k, v) => { if (v !== null && v !== undefined && v !== '') c.push([k, v]); };
+    if (f.tipo === 'guia' || f.tipo === 'boleto') {
+      add('Competência', f.competencia); add('Vencimento', dataBR(f.data_vencimento)); add('Nº do documento', f.numero_documento);
+      add('CNPJ', f.cnpj_documento); add('Valor', brl(f.valor_total));
+      if (f.composicao && f.composicao.length) add('Composição', f.composicao.map(x => `${x.descricao}: ${brl(x.total)}`).join(' · '));
+      add('Código de barras', f.linha_digitavel);
+    } else if (f.tipo === 'comprovante') {
+      add('Valor do documento', brl(f.principal)); add('Juros', brl(f.juros)); add('Multa', brl(f.multa)); add('Valor total', brl(f.valor_total));
+      add('Data do pagamento', f.data_efetiva ? dataBR(f.data_efetiva) : (f.agendamento ? 'agendamento' : 'não informada no comprovante'));
+      add('Gerado em', f.data_geracao ? dataBR(f.data_geracao) + ' (data da tela, não do pagamento)' : '');
+      add('Conta debitada', f.conta ? `${f.banco || ''} · ${f.conta}` : ''); add('Nº do agendamento', f.numero_agendamento);
+      add('Autenticação', f.autenticacao);
+    } else if (f.tipo === 'extrato_linha') {
+      add('Data', dataBR(f.data_efetiva)); add('Histórico', f.historico); add('Valor', (f.sentido === 'entrada' ? '+' : '−') + brl(f.valor_total));
+      add('Conta', [f.banco, f.agencia, f.conta].filter(Boolean).join(' · ')); add('Identificador', f.fitid);
+    }
+    return c;
+  }
+
+  function dl(pares) {
+    return `<dl class="campos">${pares.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
+  }
+
+  function abrirLateral(p) {
+    document.getElementById('lat-titulo').textContent = p.descricao;
+    const pend = visao.pendencias.filter(x => x.pagamento_id === p.id);
+    const reais = pend.filter(x => !x.informativa);
+    document.getElementById('lat-situacao').innerHTML = p.situacao === 'ok' && !reais.length ? pill('ok', 'Pronto') : pill('pendente', 'Precisa de atenção');
+
+    const docs = document.getElementById('lat-docs');
+    // Guia e comprovante primeiro: são os mais fáceis de conferir com o olho; o extrato fecha a data.
+    const ORDEM_PAPEL = { guia: 0, boleto: 0, comprovante: 1, extrato_linha: 2 };
+    p = { ...p, documentos: [...p.documentos].sort((a, b) => (ORDEM_PAPEL[a.papel] ?? 3) - (ORDEM_PAPEL[b.papel] ?? 3)) };
+    const unicos = [...new Map(p.documentos.map(d => [d.doc_id, d])).values()];
+    docs.innerHTML = unicos.map((d, i) => `<button class="btn ${i === 0 ? 'btn-primario' : ''}" data-doc="${d.doc_id}" type="button">${esc(PAPEL[d.papel] || d.papel)}</button>`).join('');
+    const iframe = document.getElementById('lat-iframe');
+    const mostrar = id => {
+      iframe.src = `/api/documento/${id}/arquivo`;
+      docs.querySelectorAll('button').forEach(b => b.classList.toggle('btn-primario', Number(b.dataset.doc) === id));
+    };
+    docs.querySelectorAll('button').forEach(b => b.onclick = () => mostrar(Number(b.dataset.doc)));
+    if (unicos.length) mostrar(unicos[0].doc_id);
+
+    const fonteData = { extrato: 'do extrato', comprovante: 'do comprovante', vencimento: 'vencimento da guia; o comprovante não traz a data' }[p.fonte_data] || '';
+    const cl = p.classificacao;
+    let html = `<div class="bloco"><h3>Resumo</h3>${dl([
+      ['Data', p.data ? `${dataBR(p.data)} (${fonteData})` : 'sem data confirmada'],
+      ['Valor', brl(p.valor)],
+      ...(Number(p.juros) || Number(p.multa) ? [['Juros / multa', `${brl(p.juros)} / ${brl(p.multa)}`]] : []),
+      ['Juntou por', p.chave],
+    ])}</div>`;
+    if (reais.length) html += `<div class="bloco">${reais.map(x => `<div class="alerta-caixa" style="margin-bottom:6px"><strong>${esc(x.titulo)}.</strong> ${esc(x.detalhe)}</div>`).join('')}</div>`;
+    for (const d of p.documentos) {
+      const f = fatoPorRef(d.ref);
+      html += `<div class="bloco"><h3>${esc(PAPEL[d.papel] || d.papel)} · ${esc(d.doc_nome)}</h3>${dl(camposDoFato(f))}</div>`;
+    }
+    html += `<div class="bloco"><h3>Lançamento</h3>${cl ? dl([
+      ['Regra', cl.regra], ['Lançamento automático', cl.lancto_auto || 'falta o código (pedido ao escritório)'],
+      ['Histórico', cl.cod_historico ?? '—'], ['Complemento', cl.complemento],
+    ]) : '<div class="alerta-caixa">Nenhuma regra classifica este pagamento ainda.</div>'}</div>`;
+    pend.filter(x => x.informativa).forEach(x => { html += `<div class="info-caixa">${esc(x.detalhe)}</div>`; });
+    html += `<p class="mute">Nesta versão o painel é só para consulta.</p>`;
+    document.getElementById('lat-detalhes').innerHTML = html;
+    document.getElementById('lateral').hidden = false;
+    document.getElementById('lateral-fundo').hidden = false;
+    document.getElementById('lat-fechar').focus();
+  }
+  function fecharLateral() {
+    document.getElementById('lateral').hidden = true;
+    document.getElementById('lateral-fundo').hidden = true;
+    document.getElementById('lat-iframe').src = 'about:blank';
+  }
+  document.getElementById('lat-fechar').onclick = fecharLateral;
+  document.getElementById('lateral-fundo').onclick = fecharLateral;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') fecharLateral(); });
+
+  // ── Carregar e enviar ──
+  async function carregar() {
+    history.replaceState(null, '', `/cliente/${empresaId}/${mes}`);
+    document.getElementById('mes-rotulo').textContent = mesExtenso(mes);
+    document.getElementById('voltar').href = `/clientes?mes=${mes}`;
+    document.getElementById('btn-cliente').href = `/cliente/${empresaId}/${mes}/enviar`;
+    try {
+      visao = await api(`/api/cliente/${empresaId}/${mes}`);
+    } catch (e) { document.getElementById('conteudo').innerHTML = `<div class="vazio">${esc(e.message)}</div>`; return; }
+    document.getElementById('razao').textContent = visao.empresa.razao_social;
+    document.title = visao.empresa.razao_social;
+    document.getElementById('cnpj').textContent = visao.empresa.cnpj_fmt;
+    let rotulo = SITUACAO[visao.situacao];
+    if (visao.situacao === 'pendencia') rotulo = visao.pendencias_abertas === 1 ? '1 pendência' : `${visao.pendencias_abertas} pendências`;
+    if (visao.situacao === 'baixada' && visao.ultimo_download) rotulo = `Baixada em ${dataBR(visao.ultimo_download.baixado_em)} (${visao.ultimo_download.usuario_nome || ''})`;
+    document.getElementById('situacao').innerHTML = pill(visao.situacao, rotulo);
+    document.getElementById('q-pagamentos').textContent = visao.pagamentos.length;
+    document.getElementById('q-documentos').textContent = visao.documentos.length;
+    document.getElementById('q-planilha').textContent = visao.linhas.length;
+    const qp = document.getElementById('q-pendencias');
+    qp.textContent = visao.pendencias_abertas; qp.classList.toggle('alerta', visao.pendencias_abertas > 0);
+    const bp = document.getElementById('btn-planilha');
+    if (visao.linhas.length) { bp.removeAttribute('aria-disabled'); bp.href = `/api/cliente/${empresaId}/${mes}/planilha.xls`; bp.style.opacity = ''; bp.title = ''; }
+    else { bp.setAttribute('aria-disabled', 'true'); bp.removeAttribute('href'); bp.style.opacity = .5; bp.title = 'Ainda não há lançamentos prontos neste mês'; }
+    desenharAba();
+  }
+
+  async function enviar(arquivos) {
+    if (!arquivos.length) return;
+    const caixa = document.getElementById('resultados');
+    caixa.innerHTML = `<div class="resultado">Lendo ${arquivos.length} ${arquivos.length === 1 ? 'arquivo' : 'arquivos'}… comprovante em imagem leva alguns segundos.</div>`;
+    const fd = new FormData();
+    [...arquivos].forEach(a => fd.append('arquivos', a));
+    try {
+      const r = await api(`/api/cliente/${empresaId}/${mes}/documentos`, { method: 'POST', body: fd });
+      caixa.innerHTML = r.resultados.map(x => x.ok
+        ? `<div class="resultado"><span class="${x.reconhecido ? 'icone-ok' : 'icone-warn'}">${x.reconhecido ? '✓' : '⚠'}</span><strong>${esc(x.nome)}</strong><span class="dim">${esc(x.tipo)}</span></div>`
+        : `<div class="resultado erro"><strong>${esc(x.nome)}</strong><span>${esc(x.erro)}</span></div>`).join('');
+    } catch (e) { caixa.innerHTML = `<div class="resultado erro">${esc(e.message)}</div>`; }
+    document.getElementById('arquivos').value = '';
+    carregar();
+  }
+
+  const zona = document.getElementById('envio');
+  ['dragenter', 'dragover'].forEach(ev => zona.addEventListener(ev, e => { e.preventDefault(); zona.classList.add('arrastando'); }));
+  ['dragleave', 'drop'].forEach(ev => zona.addEventListener(ev, e => { e.preventDefault(); zona.classList.remove('arrastando'); }));
+  zona.addEventListener('drop', e => enviar(e.dataTransfer.files));
+  document.getElementById('arquivos').onchange = e => enviar(e.target.files);
+  document.getElementById('btn-planilha').addEventListener('click', e => {
+    if (!visao || !visao.linhas.length) { e.preventDefault(); return; }
+    setTimeout(carregar, 1500);
+  });
+  document.querySelectorAll('.aba').forEach(a => a.onclick = () => { abaAtual = a.dataset.aba; desenharAba(); });
+  document.getElementById('mes-ant').onclick = () => { mes = mesDeslocado(mes, -1); carregar(); };
+  document.getElementById('mes-prox').onclick = () => { mes = mesDeslocado(mes, 1); carregar(); };
+
+  montarTopo('clientes').then(carregar);
+</script>
+</body>
+</html>

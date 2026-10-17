@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Regras</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/marca.css">
+</head>
+<body>
+<main class="pagina">
+  <div class="titulo-linha"><h1>Regras de classificação</h1></div>
+  <p class="dim" style="max-width:70ch;margin-top:-6px">Cada regra diz como um pagamento vira lançamento: qual lançamento automático do Alterdata, qual histórico e como montar o complemento. Regra da empresa vale antes da regra geral. Nesta versão a lista é só para consulta.</p>
+  <div class="painel tabela-wrap" style="margin-top:16px">
+    <table>
+      <thead><tr><th>Quando</th><th>Lança como</th><th>Histórico</th><th>Complemento</th><th>Vale para</th><th>Situação</th></tr></thead>
+      <tbody id="lista"><tr><td colspan="6" class="vazio">Carregando…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+<script src="/static/app.js"></script>
+<script>
+  const GATILHO = { tipo_doc: 'Documento é', historico_contem: 'Extrato contém', cnpj: 'CNPJ de quem recebe é' };
+  montarTopo('regras').then(async () => {
+    const tbody = document.getElementById('lista');
+    try {
+      const r = await api('/api/regras');
+      tbody.innerHTML = r.regras.length ? r.regras.map(g => `<tr>
+        <td>${esc(GATILHO[g.gatilho] || g.gatilho)} <strong>${esc(g.valor)}</strong>${g.descricao ? `<span class="desc-sub" style="display:block;color:var(--text-mute);font-size:12.5px">${esc(g.descricao)}</span>` : ''}</td>
+        <td>${g.lancto_auto ? `<span class="mono">${esc(g.lancto_auto)}</span>` : (g.conta_debito && g.conta_credito ? `D ${g.conta_debito} / C ${g.conta_credito}` : '<span style="color:var(--warn);font-style:italic">falta o código</span>')}</td>
+        <td class="num">${g.cod_historico ?? '—'}</td>
+        <td class="mono">${esc(g.modelo_complemento || '')}</td>
+        <td>${esc(g.empresa || 'Todos os clientes')}</td>
+        <td>${g.ativa ? pill('ok', 'Ativa') : pill('sem_envio', 'Desligada')}</td></tr>`).join('')
+        : `<tr><td colspan="6"><div class="vazio">Nenhuma regra cadastrada.</div></td></tr>`;
+    } catch (e) { tbody.innerHTML = `<tr><td colspan="6" class="vazio">${esc(e.message)}</td></tr>`; }
+  });
+</script>
+</body>
+</html>

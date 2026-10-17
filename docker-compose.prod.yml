@@ -1,0 +1,68 @@
+# Stack do Portal Contábil — contabilidade.jogasolucoes.com.br (Portainer / Swarm + Traefik)
+#
+# Autocontida, no molde das stacks do Multpel: Postgres PRÓPRIO (não usa o postgres_postgres),
+# volume próprio para o banco e para os documentos enviados (dado de cliente: entra no backup).
+# O container roda init_db.py a cada subida (idempotente) antes do servidor.
+#
+# 🔑 Segredos vêm do ENV DA STACK (Portainer → Environment variables), nunca literais aqui:
+#    SECRET_KEY · DB_PASSWORD · ADMIN_SENHA   (+ ESCRITORIO_NOME, ADMIN_EMAIL)
+version: "3.8"
+
+services:
+  contabilidade-app:
+    image: ghcr.io/jogasolucoesempresarias-debug/contabilidade:latest
+    networks:
+      - proxy
+      - contabilidade-internal
+    volumes:
+      - contabilidade-docs:/data/docs
+    environment:
+      FLASK_ENV: "production"
+      TZ: "America/Sao_Paulo"
+      SECRET_KEY: ${SECRET_KEY}
+      DB_HOST: "contabilidade-postgres"
+      DB_PORT: "5432"
+      DB_NAME: "portal_contabil"
+      DB_USER: "portal"
+      DB_PASSWORD: ${DB_PASSWORD}
+      ESCRITORIO_NOME: ${ESCRITORIO_NOME}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_NOME: "Administrador"
+      ADMIN_SENHA: ${ADMIN_SENHA}
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=proxy"
+        - "traefik.http.routers.contabilidade.rule=Host(`contabilidade.jogasolucoes.com.br`)"
+        - "traefik.http.routers.contabilidade.entrypoints=websecure"
+        - "traefik.http.routers.contabilidade.tls.certresolver=le"
+        - "traefik.http.services.contabilidade.loadbalancer.server.port=5000"
+
+  contabilidade-postgres:
+    image: postgres:16-alpine
+    networks:
+      - contabilidade-internal
+    environment:
+      POSTGRES_DB: "portal_contabil"
+      POSTGRES_USER: "portal"
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - contabilidade-pgdata:/var/lib/postgresql/data
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+networks:
+  proxy:
+    external: true
+  contabilidade-internal:
+    driver: overlay
+
+volumes:
+  contabilidade-pgdata:
+  contabilidade-docs:

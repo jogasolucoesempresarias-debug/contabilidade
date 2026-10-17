@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clientes</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/marca.css">
+</head>
+<body>
+<main class="pagina">
+  <div class="titulo-linha">
+    <h1>Clientes</h1>
+    <div class="seletor-mes" aria-label="Mês">
+      <button type="button" id="mes-ant" aria-label="Mês anterior">‹</button>
+      <span id="mes-rotulo">—</span>
+      <button type="button" id="mes-prox" aria-label="Próximo mês">›</button>
+    </div>
+    <div style="margin-left:auto"><button class="btn btn-primario" type="button" id="btn-novo">+ Cliente</button></div>
+  </div>
+
+  <div class="contadores" id="contadores"></div>
+
+  <div class="barra-filtros">
+    <input class="busca" id="busca" type="search" placeholder="Buscar nome ou CNPJ…" aria-label="Buscar cliente">
+  </div>
+
+  <div class="painel tabela-wrap">
+    <table>
+      <thead><tr><th>Cliente</th><th>CNPJ</th><th class="num">Documentos</th><th class="num">Pagamentos</th><th>Situação</th></tr></thead>
+      <tbody id="lista"><tr><td colspan="5" class="vazio">Carregando…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<div class="modal-fundo" id="modal" hidden>
+  <form class="modal" id="form-novo" novalidate>
+    <h2>Novo cliente</h2>
+    <div class="campo"><label for="novo-cnpj">CNPJ</label><input id="novo-cnpj" inputmode="numeric" autocomplete="off" placeholder="00.000.000/0000-00" required></div>
+    <div class="campo"><label for="novo-razao">Razão social</label><input id="novo-razao" autocomplete="off" required></div>
+    <div class="msg-erro" id="novo-erro" role="alert"></div>
+    <div class="modal-acoes">
+      <button class="btn" type="button" id="novo-cancelar">Cancelar</button>
+      <button class="btn btn-primario" type="submit">Cadastrar</button>
+    </div>
+  </form>
+</div>
+
+<script src="/static/app.js"></script>
+<script>
+  const ORDEM = ['pendencia', 'pronta', 'recebendo', 'baixada', 'sem_envio'];
+  const params = new URLSearchParams(location.search);
+  let mes = params.get('mes');
+  let filtro = params.get('situacao') || '';
+  let clientes = [];
+
+  function cnpjMascara(v) {
+    const d = v.replace(/\D/g, '').slice(0, 14);
+    return d.replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+            .replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\d{4})(\d)/, '$1-$2');
+  }
+
+  function desenhar() {
+    const cont = Object.fromEntries(ORDEM.map(s => [s, 0]));
+    clientes.forEach(c => cont[c.situacao]++);
+    document.getElementById('contadores').innerHTML =
+      `<button class="contador ${!filtro ? 'ativo' : ''}" data-s=""><strong>${clientes.length}</strong><span>Todos os clientes</span></button>` +
+      ORDEM.map(s => `<button class="contador ${filtro === s ? 'ativo' : ''}" data-s="${s}"><strong>${cont[s]}</strong><span>${SITUACAO[s]}</span></button>`).join('');
+    document.querySelectorAll('.contador').forEach(b => b.onclick = () => { filtro = b.dataset.s; atualizarUrl(); desenhar(); });
+
+    const termo = document.getElementById('busca').value.trim().toLowerCase();
+    const termoDig = termo.replace(/\D/g, '');
+    const lista = clientes.filter(c => (!filtro || c.situacao === filtro) &&
+      (!termo || c.razao_social.toLowerCase().includes(termo) || (termoDig && c.cnpj.replace(/\D/g, '').includes(termoDig))))
+      .sort((a, b) => ORDEM.indexOf(a.situacao) - ORDEM.indexOf(b.situacao) || a.razao_social.localeCompare(b.razao_social));
+    const tbody = document.getElementById('lista');
+    if (!clientes.length) {
+      tbody.innerHTML = `<tr><td colspan="5"><div class="vazio"><strong>Nenhum cliente cadastrado</strong>Use “+ Cliente” para cadastrar o primeiro.</div></td></tr>`;
+      return;
+    }
+    if (!lista.length) {
+      tbody.innerHTML = `<tr><td colspan="5"><div class="vazio">Nenhum cliente com esse filtro.</div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = lista.map(c => {
+      let rotulo = SITUACAO[c.situacao];
+      if (c.situacao === 'pendencia') rotulo = c.pendencias === 1 ? '1 pendência' : `${c.pendencias} pendências`;
+      if (c.situacao === 'baixada' && c.ultimo_download) rotulo = `Baixada em ${dataBR(c.ultimo_download.baixado_em)}${c.ultimo_download.usuario_nome ? ' (' + c.ultimo_download.usuario_nome.split(' ')[0] + ')' : ''}`;
+      return `<tr class="clicavel" data-id="${c.id}" tabindex="0">
+        <td><strong>${esc(c.razao_social)}</strong></td>
+        <td class="mono dim">${esc(c.cnpj)}</td>
+        <td class="num">${c.documentos}</td>
+        <td class="num">${c.pagamentos || '–'}</td>
+        <td>${pill(c.situacao, rotulo)}</td></tr>`;
+    }).join('');
+    tbody.querySelectorAll('tr.clicavel').forEach(tr => {
+      const abrir = () => location.href = `/cliente/${tr.dataset.id}/${mes}`;
+      tr.onclick = abrir;
+      tr.onkeydown = e => { if (e.key === 'Enter') abrir(); };
+    });
+  }
+
+  function atualizarUrl() {
+    const q = new URLSearchParams({ mes });
+    if (filtro) q.set('situacao', filtro);
+    history.replaceState(null, '', `/clientes?${q}`);
+  }
+
+  async function carregar() {
+    document.getElementById('mes-rotulo').textContent = mesExtenso(mes);
+    atualizarUrl();
+    try {
+      const r = await api(`/api/clientes?mes=${mes}`);
+      clientes = r.clientes;
+      desenhar();
+    } catch (e) {
+      document.getElementById('lista').innerHTML = `<tr><td colspan="5" class="vazio">${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  (async () => {
+    const { marca } = await montarTopo('clientes');
+    mes = mes || marca.hoje.slice(0, 7);
+    document.getElementById('mes-ant').onclick = () => { mes = mesDeslocado(mes, -1); carregar(); };
+    document.getElementById('mes-prox').onclick = () => { mes = mesDeslocado(mes, 1); carregar(); };
+    document.getElementById('busca').oninput = desenhar;
+    carregar();
+  })();
+
+  // Novo cliente
+  const modal = document.getElementById('modal');
+  const cnpjInput = document.getElementById('novo-cnpj');
+  cnpjInput.oninput = () => { cnpjInput.value = cnpjMascara(cnpjInput.value); };
+  document.getElementById('btn-novo').onclick = () => { modal.hidden = false; cnpjInput.focus(); };
+  document.getElementById('novo-cancelar').onclick = () => { modal.hidden = true; };
+  modal.addEventListener('click', e => { if (e.target === modal) modal.hidden = true; });
+  document.getElementById('form-novo').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const erro = document.getElementById('novo-erro'); erro.textContent = '';
+    try {
+      const r = await api('/api/clientes', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cnpj: cnpjInput.value, razao_social: document.getElementById('novo-razao').value }) });
+      location.href = `/cliente/${r.id}/${mes}`;
+    } catch (e) { erro.textContent = e.message; }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/marca.css">
+<style>
+  .login { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+  .login form { width: min(380px, 100%); display: grid; gap: 16px; padding: 28px; }
+  .login h1 { font-size: 20px; }
+</style>
+</head>
+<body>
+<main class="login">
+  <form class="painel" id="form" novalidate>
+    <div class="marca"><span class="marca-selo" id="selo">·</span><span id="nome-escritorio">Portal Contábil</span></div>
+    <h1>Entrar</h1>
+    <div class="campo"><label for="email">E-mail</label><input id="email" type="email" autocomplete="username" required></div>
+    <div class="campo"><label for="senha">Senha</label><input id="senha" type="password" autocomplete="current-password" required></div>
+    <div class="msg-erro" id="erro" role="alert"></div>
+    <button class="btn btn-primario" type="submit">Entrar</button>
+  </form>
+</main>
+<script src="/static/app.js"></script>
+<script>
+  api('/api/marca').then(m => {
+    document.getElementById('nome-escritorio').textContent = m.nome;
+    document.getElementById('selo').textContent = m.nome.split(/\s+/).slice(0, 2).map(p => p[0]).join('').toUpperCase();
+  }).catch(() => {});
+  document.getElementById('form').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const erro = document.getElementById('erro'); erro.textContent = '';
+    try {
+      const r = await api('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.value, senha: senha.value }) });
+      location.href = r.redirect || '/';
+    } catch (e) { erro.textContent = e.message; }
+  });
+</script>
+</body>
+</html>

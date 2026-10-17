@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Enviar documentos</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/marca.css">
+<style>
+  /* Prévia do que o cliente vai usar no celular (o portal do cliente de verdade é a fase 2). */
+  body { background: var(--surface2); }
+  .previa-aviso { max-width: 420px; margin: 16px auto 0; padding: 0 16px; font-size: 12.5px; color: var(--text-dim); text-align: center; }
+  .celular { max-width: 400px; margin: 12px auto 32px; background: var(--bg); border: 1px solid var(--border); border-radius: 28px;
+             box-shadow: var(--sombra); overflow: hidden; min-height: 720px; display: flex; flex-direction: column; }
+  @media (max-width: 440px) { .celular { border-radius: 0; border: 0; margin: 0; min-height: 100vh; } .previa-aviso { display: none; } }
+  .cel-topo { background: var(--marca); color: #fff; padding: 22px 20px 18px; }
+  .cel-topo small { opacity: .85; display: block; }
+  .cel-topo strong { font-size: 18px; display: block; margin-top: 2px; }
+  .cel-corpo { padding: 18px 16px; display: grid; gap: 16px; align-content: start; flex: 1; }
+  .cel-mes { display: flex; align-items: center; justify-content: space-between; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; }
+  .cel-enviar { display: grid; place-items: center; gap: 6px; padding: 26px 16px; border-radius: 16px; background: var(--surface); border: 1.5px dashed var(--marca); cursor: pointer; text-align: center; }
+  .cel-enviar strong { font-size: 17px; color: var(--marca); }
+  .cel-enviar span { color: var(--text-dim); font-size: 13px; }
+  .cel-lista { display: grid; gap: 8px; }
+  .cel-item { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start; }
+  .cel-item div { min-width: 0; flex: 1; }
+  .cel-item strong { display: block; overflow-wrap: anywhere; font-size: 13.5px; }
+  .cel-item span { font-size: 12.5px; color: var(--text-dim); }
+  .cel-item.erro { background: var(--erro-bg); border-color: transparent; color: var(--erro); }
+  .cel-item.erro span { color: var(--erro); }
+</style>
+</head>
+<body>
+<p class="previa-aviso">Assim o cliente verá o envio no celular. O acesso do cliente (login próprio) entra na próxima fase.</p>
+<div class="celular">
+  <div class="cel-topo"><small id="escritorio">—</small><strong id="empresa">—</strong></div>
+  <div class="cel-corpo">
+    <div class="cel-mes"><span class="dim">Documentos de</span><strong id="mes"></strong></div>
+    <label class="cel-enviar" for="arquivos">
+      <strong>Enviar documento</strong>
+      <span>Extrato, comprovante, guia ou boleto em PDF.<br>Também aceita OFX e XML. Fotos não são aceitas.</span>
+    </label>
+    <input id="arquivos" type="file" accept=".pdf,.ofx,.xml,application/pdf" multiple hidden>
+    <div class="cel-lista" id="retorno" aria-live="polite"></div>
+    <h2 style="margin:4px 0 0">Enviados</h2>
+    <div class="cel-lista" id="enviados"></div>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+<script>
+  const [, , empresaId, mes] = location.pathname.split('/');
+  const SIT = d => !d.reconhecido ? ['⚠', 'Recebido, o escritório vai conferir'] : (d.pagamentos.length ? ['✓', 'Recebido e lido'] : ['✓', 'Recebido']);
+
+  async function carregar() {
+    const v = await api(`/api/cliente/${empresaId}/${mes}`);
+    document.getElementById('empresa').textContent = v.empresa.razao_social;
+    document.getElementById('mes').textContent = mesExtenso(mes);
+    const docs = [...v.documentos].reverse();
+    document.getElementById('enviados').innerHTML = docs.length ? docs.map(d => {
+      const [ic, txt] = SIT(d);
+      return `<div class="cel-item"><span class="${ic === '✓' ? 'icone-ok' : 'icone-warn'}">${ic}</span><div><strong>${esc(d.nome)}</strong><span>${esc(txt)} · ${dataHoraBR(d.enviado_em)}</span></div></div>`;
+    }).join('') : '<p class="dim" style="margin:0">Nada enviado neste mês ainda.</p>';
+  }
+
+  document.getElementById('arquivos').onchange = async e => {
+    const arquivos = e.target.files;
+    if (!arquivos.length) return;
+    const ret = document.getElementById('retorno');
+    ret.innerHTML = `<div class="cel-item"><div><strong>Enviando…</strong><span>Aguarde, isso leva alguns segundos.</span></div></div>`;
+    const fd = new FormData();
+    [...arquivos].forEach(a => fd.append('arquivos', a));
+    fd.append('via', 'cliente');
+    try {
+      const r = await api(`/api/cliente/${empresaId}/${mes}/documentos`, { method: 'POST', body: fd });
+      ret.innerHTML = r.resultados.map(x => x.ok
+        ? `<div class="cel-item"><span class="icone-ok">✓</span><div><strong>${esc(x.nome)}</strong><span>Enviado</span></div></div>`
+        : `<div class="cel-item erro"><span>✕</span><div><strong>${esc(x.nome)}</strong><span>${esc(x.erro)}</span></div></div>`).join('');
+    } catch (err) { ret.innerHTML = `<div class="cel-item erro"><div><strong>Não foi possível enviar</strong><span>${esc(err.message)}</span></div></div>`; }
+    e.target.value = '';
+    carregar();
+  };
+
+  api('/api/marca').then(m => { document.getElementById('escritorio').textContent = m.nome; document.title = `Enviar documentos · ${m.nome}`; });
+  carregar().catch(err => { document.getElementById('enviados').innerHTML = `<p class="msg-erro">${esc(err.message)}</p>`; });
+</script>
+</body>
+</html>
