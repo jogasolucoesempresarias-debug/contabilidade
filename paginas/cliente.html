@@ -120,6 +120,18 @@
       }).join('')}</tbody></table></div>`;
   }
 
+  // Como o documento foi lido. Em imagem, o que importa é o código de barras ter fechado o
+  // dígito verificador (garante o vínculo com a guia); o percentual de confiança do OCR só
+  // aparece, como alerta, quando a leitura está fraca.
+  function lidoPor(d) {
+    if (d.origem === 'ocr') {
+      if ((d.fatos || []).some(f => f.barras44)) return 'Imagem · <span class="icone-ok">código de barras conferido ✓</span>';
+      if (d.confianca != null && d.confianca < 0.8) return 'Imagem · <span class="icone-warn">leitura a conferir</span>';
+      return 'Imagem (leitura automática)';
+    }
+    return esc(ORIGEM[d.origem] || '—');
+  }
+
   function situacaoDoc(d) {
     if (!d.reconhecido) return pill('pendencia', 'Não reconhecido nesta versão');
     if (d.pendencias.includes('P6')) return pill('erro', 'De outra empresa');
@@ -136,7 +148,7 @@
       <tbody>${ds.map(d => `<tr>
         <td><strong>${esc(d.nome)}</strong>${d.avisos && d.avisos.length ? `<span class="desc-sub">${esc(d.avisos[0])}</span>` : ''}</td>
         <td>${esc(d.tipo || '—')}</td>
-        <td>${esc(ORIGEM[d.origem] || '—')}${d.origem === 'ocr' && d.confianca != null ? ` <span class="dim">(${Math.round(d.confianca * 100)}%)</span>` : ''}</td>
+        <td>${lidoPor(d)}</td>
         <td>${situacaoDoc(d)}</td>
         <td class="dim">${dataHoraBR(d.enviado_em)}<span class="desc-sub">${d.enviado_via === 'cliente' ? 'pelo cliente' : esc(d.enviado_por || 'escritório')}</span></td>
         <td style="white-space:nowrap"><a class="btn-texto" href="/api/documento/${d.id}/arquivo" target="_blank" rel="noopener">Abrir</a>
