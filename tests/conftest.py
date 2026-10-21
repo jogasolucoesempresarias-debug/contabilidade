@@ -62,18 +62,23 @@ def leitura_comprovante():
     return ler_arquivo(open(amostra('comprovante'), 'rb').read())
 
 
+def data_debito():
+    """Dia do débito no extrato sintético = dia do pagamento do comprovante real."""
+    return date.fromisoformat(ESPERADO['comprovante']['data_pagamento'])
+
+
 @pytest.fixture(scope='session')
 def leitura_ofx_do_das(leitura_das):
-    """Extrato sintético com o débito do DAS real no vencimento + uma tarifa + um PIX recebido.
-    Os valores vêm da guia lida (nada de dado real escrito no código)."""
+    """Extrato sintético com o débito do DAS real no dia do pagamento + uma tarifa + um PIX
+    recebido. Os valores vêm dos documentos lidos (nada de dado real escrito no código)."""
     from leitura import ler_arquivo
     das = leitura_das['fatos'][0]
-    conta = ESPERADO['comprovante']['conta']
+    dia = data_debito()
     return ler_arquivo(ofx_teste([
-        ('T001', das['data_vencimento'].replace(day=5), Decimal('-49.90'), 'TARIFA PACOTE SERVICOS'),
-        ('T002', das['data_vencimento'], -das['valor_total'], 'DEB.CONV.SIMPLES NACIONAL'),
-        ('T003', das['data_vencimento'].replace(day=21), Decimal('1500.00'), 'PIX RECEBIDO CLIENTE X'),
-    ], conta=conta))
+        ('T001', dia.replace(day=5), Decimal('-49.90'), 'TARIFA PACOTE SERVICOS'),
+        ('T002', dia, -das['valor_total'], 'DEB.CONV.SIMPLES NACIONAL'),
+        ('T003', dia.replace(day=21), Decimal('1500.00'), 'PIX RECEBIDO CLIENTE X'),
+    ], conta=ESPERADO['comprovante']['conta']))
 
 
 def d(iso):

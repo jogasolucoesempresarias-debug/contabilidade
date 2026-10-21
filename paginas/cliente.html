@@ -214,8 +214,10 @@
       add('Código de barras', f.linha_digitavel);
     } else if (f.tipo === 'comprovante') {
       add('Valor do documento', brl(f.principal)); add('Juros', brl(f.juros)); add('Multa', brl(f.multa)); add('Valor total', brl(f.valor_total));
-      add('Data do pagamento', f.data_efetiva ? dataBR(f.data_efetiva) : (f.agendamento ? 'agendamento' : 'não informada no comprovante'));
-      add('Gerado em', f.data_geracao ? dataBR(f.data_geracao) + ' (data da tela, não do pagamento)' : '');
+      add('Data do pagamento', f.data_efetiva
+        ? dataBR(f.data_efetiva) + (f.hora_pagamento ? ' às ' + f.hora_pagamento.slice(0, 5) : '') + (f.origem_data === 'gerado_em' ? ' (campo “gerado em”)' : '')
+        : (f.agendamento ? 'agendamento, ainda sem pagamento' : 'não informada no comprovante'));
+      add('Identificação', f.descricao ? `${f.descricao} (digitada por quem pagou)` : '');
       add('Conta debitada', f.conta ? `${f.banco || ''} · ${f.conta}` : ''); add('Nº do agendamento', f.numero_agendamento);
       add('Autenticação', f.autenticacao);
     } else if (f.tipo === 'extrato_linha') {

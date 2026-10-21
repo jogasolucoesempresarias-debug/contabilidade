@@ -16,7 +16,6 @@ PENDENCIAS = {
     'P1': 'Linha do extrato sem documento e sem regra',
     'P2': 'Guia ou boleto sem débito no extrato',
     'P3': 'Falta o extrato para confirmar a data',
-    'P4': 'Pagamento de conta sem extrato',
     'P5': 'Mais de um débito possível no extrato',
     'P6': 'Documento de outra empresa',
     'P7': 'Documento repetido',
@@ -29,7 +28,7 @@ PENDENCIAS = {
     'DV': 'Data pelo vencimento da guia',
 }
 # Pendências que só informam: o pagamento continua indo para a planilha.
-INFORMATIVAS = {'P4', 'P7', 'JM', 'DV'}
+INFORMATIVAS = {'P7', 'JM', 'DV'}
 
 
 def _pend(codigo, detalhe, doc_ids=(), pagamento_id=None):
@@ -183,9 +182,9 @@ def _pagamento_de_grupo(gr, pend):
     descricao = (g or {}).get('rotulo') or (c or {}).get('descricao') or base.get('rotulo')
     if g and g.get('subtipo') == 'DAS':
         descricao = f'DAS {g.get("competencia") or ""}'.strip()
-    # Data: extrato › comprovante › vencimento da guia. O vencimento só entra quando há
-    # comprovante de PAGAMENTO sem data (segunda via do Sicoob: "Pagamento efetuado null") —
-    # decisão de 17/10. Agendamento continua sem data até o extrato.
+    # Data: extrato › comprovante › vencimento da guia. Comprovante com data basta sozinho (ela só
+    # manda o necessário). O vencimento só entra quando há comprovante de PAGAMENTO sem nenhuma
+    # data — decisão de 17/10. Agendamento continua sem data até o extrato.
     if e:
         data, fonte = e['data_efetiva'], 'extrato'
     elif c and c.get('data_efetiva'):
@@ -225,8 +224,6 @@ def _pagamento_de_grupo(gr, pend):
     elif fonte == 'vencimento':
         pend.append(_pend('DV', f'{descricao}: o comprovante não traz a data do pagamento; lançado com o vencimento '
                                 f'da guia ({data:%d/%m/%Y}). Se o extrato chegar, vale a data dele.', ids, pid))
-    elif not e:
-        pend.append(_pend('P4', f'{descricao}: lançado pela data do comprovante; falta o extrato da conta', ids, pid))
     if c and g and c.get('valor_total') is not None and g.get('valor_total') is not None:
         explicado = g['valor_total'] + (c.get('juros') or ZERO) + (c.get('multa') or ZERO) - (c.get('desconto') or ZERO)
         if c['valor_total'] != g['valor_total'] and c['valor_total'] != explicado:

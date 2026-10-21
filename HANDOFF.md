@@ -36,10 +36,13 @@ Pagamentos e pendências são **recalculados** a cada consulta (determinístico)
 fatos, regras e downloads ficam gravados.
 
 - **Vários documentos do mesmo pagamento = uma linha.**
-- **Data: extrato › comprovante › vencimento da guia.** O vencimento só entra quando há
-  comprovante de pagamento sem data (a segunda via do Sicoob sai "Pagamento efetuado null") —
-  decisão de 17/10; a linha fica marcada ("vencimento" + pendência informativa DV). Agendamento,
-  ou comprovante sem data e sem guia → P3 até o extrato chegar.
+- **Data: extrato › comprovante › vencimento da guia.** No comprovante do Sicoob a data e hora do
+  pagamento são o "gerado em" do quadro azul (a linha "Pagamento efetuado" sai "null"; confirmado
+  em 21/10); a linha logo abaixo do valor é texto digitado pelo pagador. Comprovante com data basta
+  sozinho. O vencimento só entra quando o comprovante não traz nenhuma data (linha marcada:
+  "vencimento" + pendência informativa DV). Agendamento, ou comprovante sem data e sem guia → P3.
+- **Leitor melhorou? Reprocesse.** A leitura fica gravada no envio. `reprocessar.py` relê os
+  documentos ativos com os leitores atuais (todos, ou por id).
 - **Código do lançamento automático:** a regra do DAS é semeada sem código; a coluna A sai em
   branco e aparece a pendência CL. Não inventar código: quando a tabela do escritório chegar, é
   `UPDATE regras SET lancto_auto = …, cod_historico = …`.
@@ -68,7 +71,9 @@ Usuários da equipe (sem tela ainda), dentro do container ou local:
    ou no YAML colado no Portainer — **nunca** commitados aqui.
 4. O container roda `init_db.py` a cada subida (idempotente) e cria o admin de `ADMIN_EMAIL`.
 5. `curl -s https://contabilidade.jogasolucoes.com.br/health`
-6. Usuários do escritório:
+6. Depois de um deploy que muda leitor, reprocessar os documentos já enviados:
+   `docker exec $(docker ps -q -f name=contabilidade_contabilidade-app) python -X utf8 reprocessar.py`
+7. Usuários do escritório:
    `docker exec $(docker ps -q -f name=contabilidade_contabilidade-app) python -X utf8 usuarios_cli.py criar email "Nome" operador`
 
 Os volumes `contabilidade-pgdata` e `contabilidade-docs` guardam dado de cliente: entram no backup.

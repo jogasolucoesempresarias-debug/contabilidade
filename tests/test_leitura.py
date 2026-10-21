@@ -34,8 +34,10 @@ def test_comprovante_sicoob_real_por_ocr(leitura_comprovante):
     assert f['juros'] == Decimal(esp['juros']) and f['multa'] == Decimal(esp['multa'])
     assert f['conta'] == esp['conta']
     assert f['numero_agendamento'] == esp['agendamento']
-    assert f['data_efetiva'] is None                    # "Pagamento efetuado null"
-    assert f['data_geracao'] == d(esp['data_geracao'])  # data da tela, NÃO do pagamento
+    # "Pagamento efetuado null": a data do pagamento é o "gerado em" do quadro azul (21/10)
+    assert f['data_efetiva'] == d(esp['data_pagamento']) and f['origem_data'] == 'gerado_em'
+    assert f['hora_pagamento'] == esp['hora_pagamento']
+    assert r['avisos'] == []
 
 
 def test_ofx_sintetico():

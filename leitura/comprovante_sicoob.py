@@ -1,9 +1,10 @@
 """Comprovante de pagamento do Sicoob (convênio/boleto), lido por OCR.
 
 Validado com um comprovante real da primeira cliente: PDF gerado pelo iPhone, uma imagem só.
-A segunda via sai "Pagamento realizado com sucesso", mas com a data em branco ("Pagamento
-efetuado null") e com "Número do agendamento". Conta como pago (decisão de 17/10); sem data,
-vale o extrato ou o vencimento da guia.
+Sai "Pagamento realizado com sucesso" com a linha da data em branco ("Pagamento efetuado null").
+A data e a hora do pagamento estão no quadro azul: "Comprovante para simples conferência gerado
+em DD/MM/AAAA às HH:MM:SS" (confirmado com o escritório em 21/10). A linha logo abaixo do valor
+(ex.: "DAS 09.26") é texto digitado por quem pagou: serve de apoio, não de fonte.
 """
 import re
 
@@ -83,11 +84,21 @@ def ler(texto):
         data_achada = data_br(m.group(1))
     else:
         data_achada = data_br(_apos(linhas, 'Data do pagamento') or _apos(linhas, 'Data de pagamento') or '')
+    m_ger = re.search(r'gerado em\s+(\d{2}/\d{2}/\d{4})(?:\s+[àa]s\s+(\d{2}:\d{2}(?::\d{2})?))?', texto, re.I)
+    data_geracao = data_br(m_ger.group(1)) if m_ger else None
+    hora = m_ger.group(2) if m_ger and m_ger.group(2) else None
+    # Data do pagamento: a data explícita, se o banco preencher; senão o "gerado em" do quadro
+    # azul, que no Sicoob é a data e hora do pagamento. Agendamento não tem data de pagamento.
     if so_agendado:
+        data_efetiva, origem_data = None, None
         avisos.append('Comprovante de agendamento: só vale com o débito no extrato')
-    elif not data_achada:
+    elif data_achada:
+        data_efetiva, origem_data = data_achada, 'campo'
+    elif data_geracao:
+        data_efetiva, origem_data = data_geracao, 'gerado_em'
+    else:
+        data_efetiva, origem_data = None, None
         avisos.append('O comprovante não informa a data do pagamento: vale o extrato ou, sem ele, o vencimento da guia')
-    m_ger = re.search(r'gerado em\s+(\d{2}/\d{2}/\d{4})', texto, re.I)
 
     conta_txt = _apos(linhas, 'Conta debitada') or ''
     m_conta = re.match(r'\s*([\dOIl|/]+?)\s*/\s*(.+)$', conta_txt)
@@ -113,9 +124,9 @@ def ler(texto):
         'convenio': convenio, 'descricao': descricao,
         'barras44': b44, 'valor_total': total, 'principal': principal, 'juros': juros,
         'multa': multa, 'desconto': desconto,
-        'data_efetiva': None if so_agendado else data_achada,
+        'data_efetiva': data_efetiva, 'origem_data': origem_data, 'hora_pagamento': hora if origem_data == 'gerado_em' else None,
         'data_agendada': data_achada if so_agendado else None,
-        'data_geracao': data_br(m_ger.group(1)) if m_ger else None,
+        'data_geracao': data_geracao,
         'agendamento': so_agendado, 'numero_agendamento': numero_agendamento,
         'pagador_nome': _apos(linhas, 'Nome/Razão social'),
         'banco': '756', 'banco_nome': _apos(linhas, 'Cooperativa'),

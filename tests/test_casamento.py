@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import casamento
 import planilha
-from tests.conftest import precisa_amostras, precisa_ocr
+from tests.conftest import data_debito, precisa_amostras, precisa_ocr
 
 REGRA_DAS_SEM_CODIGO = {'id': 1, 'empresa_id': None, 'gatilho': 'tipo_doc', 'valor': 'DAS', 'lancto_auto': '',
                         'cod_historico': None, 'modelo_complemento': 'DAS {competencia} Nº {numero}',
@@ -30,26 +30,41 @@ def _complemento(das):
     return f'DAS {das["competencia"]} Nº {das["numero_documento"]}'
 
 
+def _sem_data(leitura, **extra):
+    return {**leitura, 'fatos': [{**leitura['fatos'][0], 'data_efetiva': None, 'origem_data': None, **extra}]}
+
+
 @precisa_ocr
-def test_das_mais_comprovante_sem_data_usa_o_vencimento(leitura_das, leitura_comprovante):
-    """Os dois documentos da cliente: segunda via de pagamento sem data → vencimento da guia
-    (decisão de 17/10), com aviso informativo DV."""
+def test_das_mais_comprovante_usa_a_data_do_comprovante(leitura_das, leitura_comprovante):
+    """Os dois documentos da cliente: o comprovante traz a data no "gerado em" (21/10) e basta
+    sozinho; não precisa de extrato."""
     das = leitura_das['fatos'][0]
+    comp = leitura_comprovante['fatos'][0]
     docs = [_doc(1, 'das.pdf', leitura_das), _doc(2, 'comprovante.pdf', leitura_comprovante)]
     res = casamento.calcular(docs, _empresa(leitura_das), [REGRA_DAS_SEM_CODIGO])
     assert len(res['pagamentos']) == 1                  # dois documentos, UM pagamento
     p = res['pagamentos'][0]
     assert p['chave'] == 'Código de barras' and p['situacao'] == 'ok'
-    assert p['data'] == das['data_vencimento'] and p['fonte_data'] == 'vencimento'
-    assert _codigos(res) == ['CL', 'DV']                # falta o código; data pelo vencimento
+    assert p['data'] == comp['data_efetiva'] and p['fonte_data'] == 'comprovante'
+    assert _codigos(res) == ['CL']                      # só falta o código do lançamento
     linhas = planilha.linhas(res['pagamentos'])
-    assert len(linhas) == 1 and linhas[0]['data'] == das['data_vencimento']
+    assert len(linhas) == 1 and linhas[0]['data'] == comp['data_efetiva']
     assert linhas[0]['complemento'] == _complemento(das)
 
 
 @precisa_ocr
+def test_comprovante_sem_nenhuma_data_usa_o_vencimento(leitura_das, leitura_comprovante):
+    das = leitura_das['fatos'][0]
+    docs = [_doc(1, 'das.pdf', leitura_das), _doc(2, 'comprovante.pdf', _sem_data(leitura_comprovante))]
+    res = casamento.calcular(docs, _empresa(leitura_das), [REGRA_DAS_SEM_CODIGO])
+    p = res['pagamentos'][0]
+    assert p['data'] == das['data_vencimento'] and p['fonte_data'] == 'vencimento'
+    assert _codigos(res) == ['CL', 'DV']
+
+
+@precisa_ocr
 def test_agendamento_sem_extrato_continua_parado(leitura_das, leitura_comprovante):
-    agendado = {**leitura_comprovante, 'fatos': [{**leitura_comprovante['fatos'][0], 'agendamento': True}]}
+    agendado = _sem_data(leitura_comprovante, agendamento=True)
     res = casamento.calcular([_doc(1, 'das.pdf', leitura_das), _doc(2, 'agendamento.pdf', agendado)],
                              _empresa(leitura_das), [REGRA_DAS_SEM_CODIGO])
     assert _codigos(res) == ['P3'] and planilha.linhas(res['pagamentos']) == []
@@ -57,7 +72,7 @@ def test_agendamento_sem_extrato_continua_parado(leitura_das, leitura_comprovant
 
 @precisa_ocr
 def test_comprovante_sem_data_e_sem_guia_continua_parado(leitura_das, leitura_comprovante):
-    res = casamento.calcular([_doc(2, 'comprovante.pdf', leitura_comprovante)], _empresa(leitura_das),
+    res = casamento.calcular([_doc(2, 'comprovante.pdf', _sem_data(leitura_comprovante))], _empresa(leitura_das),
                              [REGRA_DAS_SEM_CODIGO])
     assert _codigos(res) == ['P3'] and planilha.linhas(res['pagamentos']) == []
 
@@ -69,7 +84,7 @@ def test_com_extrato_vale_a_data_do_extrato(leitura_das, leitura_comprovante, le
             _doc(3, 'extrato.ofx', leitura_ofx_do_das)]
     res = casamento.calcular(docs, _empresa(leitura_das), [REGRA_DAS_SEM_CODIGO])
     pg = next(p for p in res['pagamentos'] if p['id'].startswith('B:'))
-    assert pg['situacao'] == 'ok' and pg['data'] == das['data_vencimento'] and pg['fonte_data'] == 'extrato'
+    assert pg['situacao'] == 'ok' and pg['data'] == data_debito() and pg['fonte_data'] == 'extrato'
     assert pg['valor'] == das['valor_total']
     assert pg['chave'] == 'Código de barras + valor e data'
     assert len(pg['documentos']) == 3                   # extrato + comprovante + guia
@@ -102,7 +117,7 @@ def test_guia_mais_extrato_sem_comprovante(leitura_das, leitura_ofx_do_das):
     res = casamento.calcular([_doc(1, 'das.pdf', leitura_das), _doc(3, 'extrato.ofx', leitura_ofx_do_das)],
                              _empresa(leitura_das), [REGRA_DAS_SEM_CODIGO])
     pg = next(p for p in res['pagamentos'] if p['id'].startswith('B:'))
-    assert pg['data'] == das['data_vencimento'] and pg['chave'] == 'Valor e data'
+    assert pg['data'] == data_debito() and pg['chave'] == 'Valor e data'
 
 
 @precisa_amostras

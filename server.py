@@ -371,6 +371,16 @@ def caminho_arquivo(sha):
     return os.path.join(DOCS_DIR, sha[:2], sha)
 
 
+def gravar_fatos(cur, doc_id, fatos):
+    """Grava os fatos lidos de um documento (o envio e o reprocessar.py usam a mesma rotina)."""
+    for i, f in enumerate(fatos):
+        j = fato_para_json({k: v for k, v in f.items() if k != 'avisos'})
+        cur.execute("""INSERT INTO fatos (documento_id, ordem, tipo, dados, barras44, valor, data_efetiva, data_vencimento)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (doc_id, i, f['tipo'], json.dumps(j, ensure_ascii=False), f.get('barras44'),
+                     f.get('valor_total'), f.get('data_efetiva'), f.get('data_vencimento')))
+
+
 @app.route('/api/cliente/<int:empresa_id>/<mes>/documentos', methods=['POST'])
 @login_required
 def api_enviar(empresa_id, mes):
@@ -418,12 +428,7 @@ def api_enviar(empresa_id, mes):
                              json.dumps(lido['resumo'], ensure_ascii=False) if lido['resumo'] else None, motivo,
                              (lido['texto'] or '')[:100000], via, session.get('user_id') or None))
                 doc_id = cur.fetchone()[0]
-                for i, f in enumerate(lido['fatos']):
-                    j = fato_para_json({k: v for k, v in f.items() if k != 'avisos'})
-                    cur.execute("""INSERT INTO fatos (documento_id, ordem, tipo, dados, barras44, valor, data_efetiva, data_vencimento)
-                                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
-                                (doc_id, i, f['tipo'], json.dumps(j, ensure_ascii=False), f.get('barras44'),
-                                 f.get('valor_total'), f.get('data_efetiva'), f.get('data_vencimento')))
+                gravar_fatos(cur, doc_id, lido['fatos'])
         finally:
             con.close()
         resultados.append({'nome': nome, 'ok': True, 'id': doc_id, 'tipo': lido['tipo'] or 'Não reconhecido nesta versão',
